@@ -77,9 +77,17 @@ interface CommandContext {
   config?: Record<string, unknown>;
 }
 
+interface OpenClawCommandDefinition {
+  name: string;
+  description: string;
+  acceptsArgs?: boolean;
+  requireAuth?: boolean;
+  handler: (ctx: CommandContext) => { text: string } | Promise<{ text: string }>;
+}
+
 /** OpenClaw plugin API provided to the register function. */
 interface OpenClawPluginApi {
-  registerHook(
+  registerHook?(
     event: string,
     handler: (...args: unknown[]) => unknown,
     meta: { name: string; description: string },
@@ -94,14 +102,10 @@ interface OpenClawPluginApi {
     handler: (...args: unknown[]) => unknown,
     opts?: { priority?: number },
   ): void;
-  registerContextEngine(id: string, factory: () => ContextEngineInstance): void;
-  registerCommand?(cmd: {
-    name: string;
-    description: string;
-    acceptsArgs?: boolean;
-    requireAuth?: boolean;
-    handler: (ctx: CommandContext) => { text: string } | Promise<{ text: string }>;
-  }): void;
+  registerContextEngine?(id: string, factory: () => ContextEngineInstance): void;
+  registerCommand?:
+    | ((cmd: OpenClawCommandDefinition) => void)
+    | ((name: string, options: Omit<OpenClawCommandDefinition, "name">) => void);
   registerCli?(
     factory: (ctx: { program: unknown }) => void,
     meta: { commands: string[] },
@@ -273,10 +277,58 @@ export default {
     // info/error always emit; debug only when api.logger.debug is present
     // (i.e. OpenClaw running with --log-level debug or lower).
     const log = {
-      info: (...args: unknown[]) => api.logger?.info("[context-mode]", ...args),
-      error: (...args: unknown[]) => api.logger?.error("[context-mode]", ...args),
+      info: (...args: unknown[]) => api.logger?.info?.("[context-mode]", ...args),
+      error: (...args: unknown[]) => api.logger?.error?.("[context-mode]", ...args),
       debug: (...args: unknown[]) => api.logger?.debug?.("[context-mode]", ...args),
       warn: (...args: unknown[]) => api.logger?.warn?.("[context-mode]", ...args),
+    };
+
+    const registerCommandHook = (
+      event: string,
+      handler: () => Promise<void> | void,
+      meta: { name: string; description: string },
+    ): void => {
+      if (api.registerHook) {
+        api.registerHook(event, handler, meta);
+        return;
+      }
+      try {
+        api.on(event, handler as (...args: unknown[]) => unknown);
+        log.debug("command hook registered via api.on fallback", { event });
+      } catch (err) {
+        log.warn?.("command hook registration skipped", { event }, err);
+      }
+    };
+
+    const registerAutoReplyCommand = (command: OpenClawCommandDefinition): void => {
+      if (!api.registerCommand) return;
+      try {
+        (api.registerCommand as (cmd: OpenClawCommandDefinition) => void)(command);
+      } catch (err) {
+        try {
+          (
+            api.registerCommand as (
+              name: string,
+              options: Omit<OpenClawCommandDefinition, "name">,
+            ) => void
+          )(command.name, {
+            description: command.description,
+            acceptsArgs: command.acceptsArgs,
+            requireAuth: command.requireAuth,
+            handler: command.handler,
+          });
+        } catch (fallbackErr) {
+          log.warn?.(
+            "registerCommand compatibility fallback failed; skipping auto-reply command",
+            { name: command.name },
+            fallbackErr,
+          );
+          log.debug("registerCommand primary signature error", {
+            name: command.name,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
     };
 
     // Get shared DB singleton (lazy-init on first register() call)
@@ -465,7 +517,7 @@ export default {
 
     // ── 3. command:new — Session initialization ────────────
 
-    api.registerHook(
+    registerCommandHook(
       "command:new",
       async () => {
         try {
@@ -484,7 +536,7 @@ export default {
 
     // ── 3b. command:reset / command:stop — Session cleanup ────
 
-    api.registerHook(
+    registerCommandHook(
       "command:reset",
       async () => {
         try {
@@ -499,8 +551,7 @@ export default {
         description: "Session cleanup on /reset command",
       },
     );
-
-    api.registerHook(
+    registerCommandHook(
       "command:stop",
       async () => {
         try {
@@ -745,29 +796,33 @@ export default {
 
     // ── 9. Context engine — Compaction management ──────────
 
-    api.registerContextEngine("context-mode", () => ({
-      info: {
-        id: "context-mode",
-        name: "Context Mode",
-        ownsCompaction: false,
-      },
+    if (api.registerContextEngine) {
+      api.registerContextEngine("context-mode", () => ({
+        info: {
+          id: "context-mode",
+          name: "Context Mode",
+          ownsCompaction: false,
+        },
 
-      async ingest() {
-        return { ingested: true };
-      },
+        async ingest() {
+          return { ingested: true };
+        },
 
-      async assemble({ messages }: { messages: unknown[] }) {
-        return { messages, estimatedTokens: 0 };
-      },
+        async assemble({ messages }: { messages: unknown[] }) {
+          return { messages, estimatedTokens: 0 };
+        },
 
-      async compact() {
-        // No-op: session continuity is handled by before_compaction / after_compaction hooks.
-        // Returning ownsCompaction: false + compacted: false lets the host platform (OpenClaw)
-        // manage conversation truncation, preserving Anthropic thinking/redacted_thinking blocks.
-        // See: https://github.com/mksglu/context-mode/issues/191
-        return { ok: true, compacted: false };
-      },
-    }));
+        async compact() {
+          // No-op: session continuity is handled by before_compaction / after_compaction hooks.
+          // Returning ownsCompaction: false + compacted: false lets the host platform (OpenClaw)
+          // manage conversation truncation, preserving Anthropic thinking/redacted_thinking blocks.
+          // See: https://github.com/mksglu/context-mode/issues/191
+          return { ok: true, compacted: false };
+        },
+      }));
+    } else {
+      log.warn?.("api.registerContextEngine unavailable — skipping context engine registration");
+    }
 
     // ── 10. Auto-reply commands — ctx slash commands ──────
     // Update module-level refs so command handlers (registered once) always
@@ -777,7 +832,7 @@ export default {
     _latestPluginRoot = pluginRoot;
 
     if (api.registerCommand) {
-      api.registerCommand({
+      registerAutoReplyCommand({
         name: "ctx-stats",
         description: "Show context-mode session statistics",
         handler: () => {
@@ -785,8 +840,7 @@ export default {
           return { text };
         },
       });
-
-      api.registerCommand({
+      registerAutoReplyCommand({
         name: "ctx-doctor",
         description: "Run context-mode diagnostics",
         handler: () => {
@@ -808,7 +862,7 @@ export default {
         },
       });
 
-      api.registerCommand({
+      registerAutoReplyCommand({
         name: "ctx-upgrade",
         description: "Upgrade context-mode to the latest version",
         handler: () => {

@@ -50,6 +50,52 @@ interface MockContextEngine {
   };
 }
 
+function createMockApiWithoutRegisterHook() {
+  const lifecycle: MockLifecycleEntry[] = [];
+  const tools: MockToolEntry[] = [];
+  const commands: MockV2CommandEntry[] = [];
+  const warnings: unknown[][] = [];
+
+  return {
+    lifecycle,
+    tools,
+    commands,
+    warnings,
+    api: {
+      on(
+        event: string,
+        handler: (...args: unknown[]) => unknown,
+        opts?: { priority?: number },
+      ) {
+        lifecycle.push({ event, handler, opts });
+      },
+      registerCommand(name: unknown, options: unknown) {
+        if (
+          typeof name !== "string" ||
+          !options ||
+          typeof options !== "object" ||
+          typeof (options as { handler?: unknown }).handler !== "function"
+        ) {
+          throw new TypeError("registerCommand(name, options) expected");
+        }
+        commands.push({
+          name,
+          options: options as MockV2CommandEntry["options"],
+        });
+      },
+      registerTool(
+        tool: Omit<MockToolEntry, "optional">,
+        opts?: { optional?: boolean },
+      ) {
+        tools.push({ ...tool, optional: opts?.optional });
+      },
+      logger: {
+        warn: (...args: unknown[]) => warnings.push(args),
+      },
+    },
+  };
+}
+
 interface MockCommandEntry {
   name: string;
   description: string;
@@ -65,6 +111,11 @@ interface MockToolEntry {
   execute: (id: string, params: Record<string, unknown>) =>
     Promise<{ content: Array<{ type: "text"; text: string }> }>;
   optional?: boolean;
+}
+
+interface MockV2CommandEntry {
+  name: string;
+  options: { description?: string; handler: (...args: unknown[]) => unknown };
 }
 
 function createMockApiFull() {
@@ -264,6 +315,22 @@ describe("OpenClawPlugin", () => {
         expect(hook.meta.name).toMatch(/^context-mode\./);
         expect(hook.meta.description.length).toBeGreaterThan(0);
       }
+    });
+
+    it("degrades gracefully when registerHook and registerContextEngine are unavailable", async () => {
+      const { default: plugin } = await import("../../src/adapters/openclaw/plugin.js");
+      const mock = createMockApiWithoutRegisterHook();
+
+      expect(() => plugin.register(mock.api as unknown as Parameters<typeof plugin.register>[0]))
+        .not.toThrow();
+      expect(mock.tools.length).toBeGreaterThan(0);
+      expect(mock.commands.map((c) => c.name)).toEqual(
+        expect.arrayContaining(["ctx-stats", "ctx-doctor", "ctx-upgrade"]),
+      );
+      const lifecycleNames = mock.lifecycle.map((h) => h.event);
+      expect(lifecycleNames).toContain("before_tool_call");
+      expect(lifecycleNames).toContain("command:new");
+      expect(mock.warnings.length).toBeGreaterThan(0);
     });
   });
 
