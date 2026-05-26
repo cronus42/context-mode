@@ -525,6 +525,17 @@ describe("OpenClawPlugin", () => {
       expect(result.appendSystemContext).toContain("context-mode");
     });
 
+    it("injects skill-like guidance derived from skills/context-mode/SKILL.md", async () => {
+      const mock = await createTestPlugin(join(tempDir, "prompt-skill-like"));
+      await flushInit(mock);
+      const promptHook = mock.lifecycle.find(
+        (l) => l.event === "before_prompt_build" && l.opts?.priority === 5,
+      );
+      const result = promptHook!.handler() as { appendSystemContext?: string };
+      expect(result?.appendSystemContext).toContain("<context_mode_skill_like_guidance");
+      expect(result?.appendSystemContext).toContain("Default to context-mode for ALL commands.");
+    });
+
     it("has priority 5", async () => {
       const mock = await createTestPlugin(join(tempDir, "prompt-priority"));
       const promptHook = mock.lifecycle.find(
@@ -671,6 +682,7 @@ describe("OpenClawPlugin", () => {
       expect(out?.inputOverride?.prompt).toBeDefined();
       expect(out!.inputOverride!.prompt!).toContain("Investigate the failing test.");
       expect(out!.inputOverride!.prompt!).toContain("<context_window_protection>");
+      expect(out!.inputOverride!.prompt!).toContain("<context_mode_skill_like_guidance");
     });
 
     it("falls back gracefully when input.prompt is missing", async () => {
@@ -681,6 +693,7 @@ describe("OpenClawPlugin", () => {
         | { inputOverride?: { prompt?: string } }
         | undefined;
       expect(out?.inputOverride?.prompt).toContain("<context_window_protection>");
+      expect(out?.inputOverride?.prompt).toContain("<context_mode_skill_like_guidance");
     });
   });
 

@@ -57,12 +57,54 @@ const SYSTEM_REMINDER_PREFIXES = [
   "<context_guidance>",
   "<tool-result>",
 ] as const;
+const SKILL_FRONTMATTER_REGEX = /^---\s*\n[\s\S]*?\n---\s*\n?/;
+const OPENCLAW_SKILL_PROMPT_CHAR_LIMIT = 6000;
+const SKILL_SECTION_HEADINGS = [
+  "MANDATORY RULE",
+  "Decision Tree",
+  "When to Use Each Tool",
+  "Critical Rules",
+] as const;
 function isSystemReminderMessage(msg: string): boolean {
   const trimmed = msg.trimStart();
   for (const prefix of SYSTEM_REMINDER_PREFIXES) {
     if (trimmed.startsWith(prefix)) return true;
   }
   return false;
+}
+function stripMarkdownFrontmatter(markdown: string): string {
+  const normalized = markdown.replace(/\r\n/g, "\n");
+  return normalized.replace(SKILL_FRONTMATTER_REGEX, "").trim();
+}
+function extractMarkdownSection(markdown: string, heading: string): string | null {
+  const sectionHeader = `## ${heading}`;
+  const start = markdown.indexOf(sectionHeader);
+  if (start === -1) return null;
+  const afterHeader = markdown.slice(start + sectionHeader.length);
+  const nextHeadingOffset = afterHeader.search(/\n##\s+|\n#\s+/);
+  const body = (nextHeadingOffset === -1 ? afterHeader : afterHeader.slice(0, nextHeadingOffset)).trim();
+  if (!body) return null;
+  return `${sectionHeader}\n\n${body}`;
+}
+function buildOpenClawSkillLikeGuidance(skillMarkdown: string): string {
+  const skillBody = stripMarkdownFrontmatter(skillMarkdown);
+  const skillTitle = skillBody.match(/^#\s+.+$/m)?.[0]?.trim() ?? "# Context Mode Skill";
+  const selectedSections = SKILL_SECTION_HEADINGS
+    .map((heading) => extractMarkdownSection(skillBody, heading))
+    .filter((section): section is string => Boolean(section));
+  const rawContent = (
+    selectedSections.length > 0
+      ? [skillTitle, ...selectedSections].join("\n\n")
+      : skillBody
+  ).trim();
+  const boundedContent = rawContent.length > OPENCLAW_SKILL_PROMPT_CHAR_LIMIT
+    ? `${rawContent.slice(0, OPENCLAW_SKILL_PROMPT_CHAR_LIMIT).trimEnd()}\n\n[skill excerpt truncated for prompt budget]`
+    : rawContent;
+  return [
+    "<context_mode_skill_like_guidance source=\"skills/context-mode/SKILL.md\">",
+    boundedContent,
+    "</context_mode_skill_like_guidance>",
+  ].join("\n");
 }
 
 // ── OpenClaw Plugin API Types ─────────────────────────────
@@ -354,6 +396,7 @@ export default {
     // with createRoutingBlock(createToolNamer("openclaw")) so OpenClaw-specific
     // MCP-prefix substitution stays in lockstep with hooks/routing-block.mjs.
     let routingInstructions = "";
+    let skillLikeInstructions = "";
     const initPromise = (async () => {
       const routingPath = resolve(buildDir, "..", "..", "..", "hooks", "core", "routing.mjs");
       const routing = await import(pathToFileURL(routingPath).href);
@@ -391,6 +434,17 @@ export default {
         } catch {
           // best effort
         }
+      }
+
+      try {
+        const skillPath = resolve(pluginRoot, "skills", "context-mode", "SKILL.md");
+        if (existsSync(skillPath)) {
+          skillLikeInstructions = buildOpenClawSkillLikeGuidance(readFileSync(skillPath, "utf-8"));
+        } else {
+          log.debug("context-mode skill file missing; skipping skill-like prompt injection", { skillPath });
+        }
+      } catch (err) {
+        log.warn?.("failed to build skill-like guidance from SKILL.md", err);
       }
 
       return { routing };
@@ -715,13 +769,21 @@ export default {
     api.on(
       "before_prompt_build",
       () => {
-        if (!routingInstructions) return undefined;
-        log.debug("before_prompt_build[routing]", { hasInstructions: !!routingInstructions });
-        // v1.0.107 — visible marker so OpenClaw users can verify the routing
-        // block reached the model (Mickey-class verification path; mirrors
-        // OpenCode + Pi adapters).
-        const marker = `<!-- context-mode: routing block injected (sessionID=${String(sessionId).slice(0, 8)}) -->`;
-        return { appendSystemContext: marker + "\n" + routingInstructions };
+        if (!routingInstructions && !skillLikeInstructions) return undefined;
+        log.debug("before_prompt_build[routing+skill]", {
+          hasRoutingInstructions: !!routingInstructions,
+          hasSkillLikeInstructions: !!skillLikeInstructions,
+        });
+        const injectedBlocks: string[] = [];
+        if (routingInstructions) {
+          // v1.0.107 — visible marker so OpenClaw users can verify the routing
+          // block reached the model (Mickey-class verification path; mirrors
+          // OpenCode + Pi adapters).
+          const marker = `<!-- context-mode: routing block injected (sessionID=${String(sessionId).slice(0, 8)}) -->`;
+          injectedBlocks.push(marker + "\n" + routingInstructions);
+        }
+        if (skillLikeInstructions) injectedBlocks.push(skillLikeInstructions);
+        return { appendSystemContext: injectedBlocks.join("\n\n") };
       },
       { priority: 5 },
     );
@@ -779,13 +841,19 @@ export default {
         try {
           const e = (event ?? {}) as { input?: { prompt?: string } };
           const basePrompt = e?.input?.prompt ?? "";
-          if (!routingInstructions) return undefined;
+          if (!routingInstructions && !skillLikeInstructions) return undefined;
+          const injectedBlocks: string[] = [];
+          if (routingInstructions) injectedBlocks.push(routingInstructions);
+          if (skillLikeInstructions) injectedBlocks.push(skillLikeInstructions);
+          const injectedPromptBlock = injectedBlocks.join("\n\n");
           const newPrompt = basePrompt
-            ? `${basePrompt}\n\n${routingInstructions}`
-            : routingInstructions;
-          log.debug("subagent_spawning[inject-routing]", {
+            ? `${basePrompt}\n\n${injectedPromptBlock}`
+            : injectedPromptBlock;
+          log.debug("subagent_spawning[inject-routing+skill]", {
             basePromptLen: basePrompt.length,
-            blockLen: routingInstructions.length,
+            hasRoutingInstructions: !!routingInstructions,
+            hasSkillLikeInstructions: !!skillLikeInstructions,
+            blockLen: injectedPromptBlock.length,
           });
           return { inputOverride: { ...(e.input ?? {}), prompt: newPrompt } };
         } catch {
