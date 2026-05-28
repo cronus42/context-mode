@@ -53,7 +53,7 @@ interface MockContextEngine {
 function createMockApiWithoutRegisterHook() {
   const lifecycle: MockLifecycleEntry[] = [];
   const tools: MockToolEntry[] = [];
-  const commands: MockV2CommandEntry[] = [];
+  const commands: MockCommandEntry[] = [];
   const warnings: unknown[][] = [];
 
   return {
@@ -69,19 +69,16 @@ function createMockApiWithoutRegisterHook() {
       ) {
         lifecycle.push({ event, handler, opts });
       },
-      registerCommand(name: unknown, options: unknown) {
+      registerCommand(command: unknown) {
         if (
-          typeof name !== "string" ||
-          !options ||
-          typeof options !== "object" ||
-          typeof (options as { handler?: unknown }).handler !== "function"
+          !command ||
+          typeof command !== "object" ||
+          typeof (command as { name?: unknown }).name !== "string" ||
+          typeof (command as { handler?: unknown }).handler !== "function"
         ) {
-          throw new TypeError("registerCommand(name, options) expected");
+          throw new TypeError("registerCommand(command) expected");
         }
-        commands.push({
-          name,
-          options: options as MockV2CommandEntry["options"],
-        });
+        commands.push(command as MockCommandEntry);
       },
       registerTool(
         tool: Omit<MockToolEntry, "optional">,
@@ -111,11 +108,6 @@ interface MockToolEntry {
   execute: (id: string, params: Record<string, unknown>) =>
     Promise<{ content: Array<{ type: "text"; text: string }> }>;
   optional?: boolean;
-}
-
-interface MockV2CommandEntry {
-  name: string;
-  options: { description?: string; handler: (...args: unknown[]) => unknown };
 }
 
 function createMockApiFull() {

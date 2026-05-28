@@ -145,9 +145,7 @@ interface OpenClawPluginApi {
     opts?: { priority?: number },
   ): void;
   registerContextEngine?(id: string, factory: () => ContextEngineInstance): void;
-  registerCommand?:
-    | ((cmd: OpenClawCommandDefinition) => void)
-    | ((name: string, options: Omit<OpenClawCommandDefinition, "name">) => void);
+  registerCommand?: (cmd: OpenClawCommandDefinition) => void;
   registerCli?(
     factory: (ctx: { program: unknown }) => void,
     meta: { commands: string[] },
@@ -345,31 +343,13 @@ export default {
     const registerAutoReplyCommand = (command: OpenClawCommandDefinition): void => {
       if (!api.registerCommand) return;
       try {
-        (api.registerCommand as (cmd: OpenClawCommandDefinition) => void)(command);
+        api.registerCommand(command);
       } catch (err) {
-        try {
-          (
-            api.registerCommand as (
-              name: string,
-              options: Omit<OpenClawCommandDefinition, "name">,
-            ) => void
-          )(command.name, {
-            description: command.description,
-            acceptsArgs: command.acceptsArgs,
-            requireAuth: command.requireAuth,
-            handler: command.handler,
-          });
-        } catch (fallbackErr) {
-          log.warn?.(
-            "registerCommand compatibility fallback failed; skipping auto-reply command",
-            { name: command.name },
-            fallbackErr,
-          );
-          log.debug("registerCommand primary signature error", {
-            name: command.name,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
+        log.warn?.(
+          "registerCommand failed; skipping auto-reply command",
+          { name: command.name },
+          err,
+        );
       }
     };
 
