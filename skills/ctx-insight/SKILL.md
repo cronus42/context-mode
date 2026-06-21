@@ -20,5 +20,5 @@ Open the hosted Insight dashboard in the user's default browser.
 2. Display the tool's output to the user.
 3. Tell the user:
    - "Insight opened at https://context-mode.com/insight"
-   - "Sign in at platform.context-mode.com to connect your team — $20 / seat / month."
+   - The landing page at context-mode.com/insight is the single source of truth for sign-in and pricing details.
    - If the browser did not open automatically, share the URL so they can open it manually.

@@ -4537,7 +4537,7 @@ export function killProcessOnPort(
 
 // ── ctx-insight: open the hosted Insight dashboard ───────────────────────────
 // Insight pivoted from a locally-built dashboard to the hosted B2B product at
-// context-mode.com/insight (org analytics; sign-in at platform.context-mode.com).
+// context-mode.com/insight (the landing page is the single source of truth).
 // The tool now simply opens that URL in the user default browser via the same
 // cross-platform helper (openBrowserSync) used elsewhere.
 const INSIGHT_URL = "https://context-mode.com/insight";
@@ -4550,8 +4550,8 @@ server.registerTool(
       "Opens the context-mode Insight dashboard (https://context-mode.com/insight) in your " +
       "default browser — a dashboard launcher for the hosted analytics layer, not a Q&A engine. " +
       "Insight surfaces per-engineer productive rate, retry waste, blocker detection, and " +
-      "role-narrowed views for CTO, EM, IC, CISO, FinOps, and DevOps; sign in at " +
-      "platform.context-mode.com. For natural-language queries over your indexed content, use ctx_search.",
+      "role-narrowed views for CTO, EM, IC, CISO, FinOps, and DevOps. " +
+      "For natural-language queries over your indexed content, use ctx_search.",
     inputSchema: z.object({}),
   },
   async () => {

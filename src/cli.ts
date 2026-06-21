@@ -1192,8 +1192,8 @@ async function doctor(): Promise<number> {
  * Insight — hosted analytics dashboard
  * ------------------------------------------------------- */
 
-// Insight pivoted from a locally-built dashboard to the hosted B2B product at
-// context-mode.com/insight (sign-in + org analytics at platform.context-mode.com).
+// Insight pivoted from a locally-built dashboard to the hosted product at
+// context-mode.com/insight (the landing page is the single source of truth).
 // The command now just opens that URL in the default browser.
 async function insight() {
   const url = "https://context-mode.com/insight";

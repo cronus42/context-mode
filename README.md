@@ -93,7 +93,7 @@ All checks should show `[x]`. The doctor validates runtimes, hooks, FTS5, and pl
 | `/context-mode:ctx-search` | Search previously indexed content. |
 | `/context-mode:ctx-upgrade` | Pull latest, rebuild, migrate cache, fix hooks. |
 | `/context-mode:ctx-purge` | Permanently delete all indexed content from the knowledge base. |
-| `/context-mode:ctx-insight` | Opens the hosted Insight dashboard ([context-mode.com/insight](https://context-mode.com/insight)) in your browser — org analytics for AI-assisted engineering teams. Sign in at platform.context-mode.com. |
+| `/context-mode:ctx-insight` | Opens the hosted Insight dashboard ([context-mode.com/insight](https://context-mode.com/insight)) in your browser — org analytics for AI-assisted engineering teams. |
 
 > **Note:** Slash commands are a Claude Code plugin feature. On other platforms, type `ctx stats`, `ctx doctor`, `ctx index`, `ctx search`, `ctx upgrade`, or `ctx insight` in the chat — the model calls the MCP tool automatically. See [Utility Commands](#utility-commands).
 
